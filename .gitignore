@@ -1,11 +1,12 @@
 # Prerequisites
-*.d
+lib/**
 
 # Compiled Object files
 *.slo
 *.lo
-*.o
+
 *.obj
+objs/**/*
 
 # Precompiled Headers
 *.gch
@@ -30,3 +31,13 @@
 *.exe
 *.out
 *.app
+*.bin
+
+
+#IDE Files
+.c4droid
+.vscode/**
+
+
+#Outputs
+err.txt

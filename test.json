@@ -1,0 +1,21 @@
+{
+    "some_array": [
+        "hello",
+        "world!",
+        0,
+        6,
+        1,
+        false
+    ],
+    "some_dir": {
+        "some_inner_dir": {
+            "some.txt": "hello, world",
+            "some_bin": null,
+            "some_bool": false,
+            "some_field": "some_value\nHELLO WORLD!",
+            "some_null": null,
+            "some_number": 40,
+            "some_other_field": "some_value2"
+        }
+    }
+}
