@@ -23,18 +23,14 @@ namespace RamFS
 		session->can_read = ((flags & O_WRONLY) == 0);
 		session->can_write = ((flags & O_RDONLY) == 0);
 		
-		if ((flags & O_RDWR) != 0)
+		if ((flags & O_RDWR) == O_RDWR)
 		{
 			session->can_read = session->can_write = true;
 		}
-
-		if (session->can_write && host()->is_read_only())
-		{
-			host()->close_session(session);
-			return -EACCES;
-		}
 		
 		session->append = ((flags & O_APPEND) != 0);
+
+		session->can_write &= !host()->is_read_only();
 		
 		
 		

@@ -181,8 +181,6 @@ namespace RamFS
 	{
 		assert(m_json_doc.is_object());
 		this->populate_obj(m_root, m_json_doc);
-
-		std::cout << "Initial JSON: \n" << m_json_doc.dump(4) << std::endl;
 	}
 
 	void RamFilesystem::populate_from_json(DirectoryNode* dir, const std::string& name, nlohmann::json& val)
@@ -225,10 +223,6 @@ namespace RamFS
 
 				populate_field(node, val);
 			}
-			// else if (val.is_null())
-			// {
-			// 	// Do nothing
-			// }
 		}
 		catch (const std::exception& ex)
 		{
