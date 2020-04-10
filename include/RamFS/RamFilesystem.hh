@@ -38,9 +38,11 @@ namespace RamFS
 		std::map<node_id_t, Node*> m_nodes;
 		nlohmann::json m_json_doc;
 		TimeInfo m_doc_times;
+		bool m_read_only;
 		
 		
 		public:
+		RamFilesystem(const std::string& JSON_path, bool read_only);
 		RamFilesystem(const std::string& JSON_path);
 		
 		DirectoryNode* root() const
@@ -55,7 +57,7 @@ namespace RamFS
 
 		bool is_read_only() const
 		{
-			return false;
+			return m_read_only;
 		}
 		
 		Node* get_node(const char* path) const;
@@ -65,6 +67,8 @@ namespace RamFS
 			return m_id_counter++;
 		}
 
+		int unlink(Node*);
+		bool node_in_use(Node*) const;
 		
 		
 		protected:
@@ -78,6 +82,7 @@ namespace RamFS
 		int set_session(OpenSession*, fuse_file_info*);
 		
 		Node* resolve_if_link(Node*) const;
+		const Node* resolve_if_link(const Node*) const;
 		
 		int prepare_for_create(const char* path, DirectoryNode** parent, std::string* name);
 		
@@ -92,7 +97,12 @@ namespace RamFS
 		int fill_stat_directory(DirectoryNode*, struct stat*);
 		int fill_stat_link(LinkNode*, struct stat*);
 		
+		int remove_node(Node*);
 		void delete_node(Node* n);
+		int delete_dir(DirectoryNode* n);
+
+		bool file_in_use(FileNode*) const;
+		bool dir_in_use(DirectoryNode* dir) const;
 
 		void update_source_json();
 

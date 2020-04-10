@@ -77,6 +77,20 @@ namespace RamFS
 
 			return children;
 		}
+
+		bool remove_child(const std::string& name)
+		{
+			auto it = m_entries.find(name);
+			if (it != m_entries.end())
+			{
+				m_entries.erase(it);
+				return true;
+			}
+			else
+			{
+				return false;
+			}
+		}
 	};
 }
 

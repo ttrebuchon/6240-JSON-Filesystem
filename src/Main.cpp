@@ -11,6 +11,7 @@
 static struct FSOptions
 {
 	char* json_path = nullptr;
+	int writeable = 0;
 } opts;
 
 
@@ -24,6 +25,11 @@ static int opt_proc(void* data, const char* arg, int key, struct fuse_args* outa
 static struct fuse_opt eligible_opts[] = 
 {
 	{ "--json=%s", offsetof(FSOptions, json_path), 0 },
+	{ "--write", offsetof(FSOptions, writeable), 1},
+	{ "-w", offsetof(FSOptions, writeable), 1},
+	{ "--write=true", offsetof(FSOptions, writeable), 1},
+	{ "--write=false", offsetof(FSOptions, writeable), 0},
+	
 	FUSE_OPT_END
 };
 
@@ -57,7 +63,7 @@ int main(int argc, char* argv[])
 
 
 	RamFS::FUSEOperations<RamFS::RamFilesystem> fuse;
-	fuse.fs = new RamFS::RamFilesystem(opts.json_path);
+	fuse.fs = new RamFS::RamFilesystem(opts.json_path, opts.writeable == 0);
 	rc = fuse.main(args.argc, args.argv);
 	
 	return rc;

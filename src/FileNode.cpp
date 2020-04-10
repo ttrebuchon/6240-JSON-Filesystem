@@ -27,6 +27,12 @@ namespace RamFS
 		{
 			session->can_read = session->can_write = true;
 		}
+
+		if (session->can_write && host()->is_read_only())
+		{
+			host()->close_session(session);
+			return -EACCES;
+		}
 		
 		session->append = ((flags & O_APPEND) != 0);
 		

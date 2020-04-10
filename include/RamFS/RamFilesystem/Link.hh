@@ -16,7 +16,7 @@ namespace RamFS
 		
 		public:
 		
-		int resolve(Node**)
+		int resolve(Node**) const
 		{
 			bool TODO = false;
 			assert(TODO);

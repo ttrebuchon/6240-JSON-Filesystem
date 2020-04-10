@@ -16,9 +16,7 @@
 namespace RamFS
 {
 	
-	
-	
-	RamFilesystem::RamFilesystem(const std::string& JSON_path) :
+	RamFilesystem::RamFilesystem(const std::string& JSON_path, bool read_only) :
 		json_path(JSON_path),
 		m_sessions(),
 		m_root(nullptr),
@@ -26,7 +24,8 @@ namespace RamFS
 		m_available_sessions(),
 		m_id_counter(1),
 		m_nodes(),
-		m_json_doc()
+		m_json_doc(),
+		m_read_only(read_only)
 	{
 		
 
@@ -55,6 +54,12 @@ namespace RamFS
 		m_nodes[root_id] = m_root;
 
 		this->initial_populate();
+	}
+	
+	RamFilesystem::RamFilesystem(const std::string& JSON_path) :
+		RamFilesystem(JSON_path, true)
+	{
+		
 	}
 	
 	
@@ -207,7 +212,7 @@ namespace RamFS
 					populate_array(node, val);
 				}
 			}
-			else if (val.is_string() || val.is_boolean() || val.is_number())
+			else if (val.is_string() || val.is_boolean() || val.is_number() || val.is_null())
 			{
 				node_id_t new_id = allocate_id();
 				std::shared_ptr<FileData> fdata = allocate_file_data();
@@ -220,10 +225,10 @@ namespace RamFS
 
 				populate_field(node, val);
 			}
-			else if (val.is_null())
-			{
-				// Do nothing
-			}
+			// else if (val.is_null())
+			// {
+			// 	// Do nothing
+			// }
 		}
 		catch (const std::exception& ex)
 		{
@@ -291,7 +296,7 @@ namespace RamFS
 			}
 			else
 			{
-				// TODO
+				// TODO(?)
 				NOT_IMPLEMENTED;
 			}
 			
@@ -307,6 +312,10 @@ namespace RamFS
 			{
 				str_contents = "false";
 			}
+		}
+		else if (j.is_null())
+		{
+			str_contents = std::string();
 		}
 		else
 		{
@@ -364,6 +373,30 @@ namespace RamFS
 		while (n && n->has_flag(RAM_LINK_NODE))
 		{
 			if (((LinkNode*)n)->resolve(&result) != 0)
+			{
+				return nullptr;
+			}
+			else
+			{
+				n = result;
+			}
+		}
+		
+		return n;
+	}
+
+	const Node* RamFilesystem::resolve_if_link(const Node* n) const
+	{
+		if (!n)
+		{
+			return nullptr;
+		}
+		
+		
+		Node* result = nullptr;
+		while (n && n->has_flag(RAM_LINK_NODE))
+		{
+			if (((const LinkNode*)n)->resolve(&result) != 0)
 			{
 				return nullptr;
 			}
@@ -649,6 +682,80 @@ namespace RamFS
 		}
 	}
 
+	int RamFilesystem::delete_dir(DirectoryNode* dir)
+	{
+		if (this->is_read_only())
+		{
+			return -EACCES;
+		}
+
+		
+		while (!dir->entries().empty())
+		{
+			auto pair = *dir->entries().begin();
+			assert(!pair.first.empty());
+			Node* child = get_node(pair.second);
+			if (!child)
+			{
+				dir->remove_child(pair.first);
+				continue;
+			}
+			
+			if (node_in_use(child))
+			{
+				return -EBUSY;
+			}
+
+			int rc = this->unlink(child);
+			if (rc != 0)
+			{
+				return rc;
+			}
+		}
+
+		this->delete_node(dir);
+		return 0;
+	}
+
+	bool RamFilesystem::file_in_use(FileNode* n) const
+	{
+		if (!n)
+		{
+			return false;
+		}
+
+		for (const auto& handle_session : m_sessions)
+		{
+			const OpenSession& session = handle_session.second;
+			if (session.node == n)
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	bool RamFilesystem::dir_in_use(DirectoryNode* n) const
+	{
+		if (!n)
+		{
+			return false;
+		}
+
+		auto children = n->get_children();
+
+		for (const std::pair<std::string, Node*>& pair : children)
+		{
+			if (node_in_use(pair.second))
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
 	void RamFilesystem::update_source_json()
 	{
 		std::ofstream os(json_path);
@@ -821,6 +928,10 @@ namespace RamFS
 	
 	int RamFilesystem::mknod(const char* path, mode_t mode, dev_t dev)
 	{
+		if (this->is_read_only())
+		{
+			return -EACCES;
+		}
 		DirectoryNode* parent;
 		std::string name;
 		if (mode & S_IFREG)
@@ -846,6 +957,10 @@ namespace RamFS
 	
 	int RamFilesystem::mkdir(const char* path, mode_t mode)
 	{
+		if (this->is_read_only())
+		{
+			return -EACCES;
+		}
 		mode |= S_IFDIR;
 
 		std::string name;
@@ -876,20 +991,35 @@ namespace RamFS
 	
 	int RamFilesystem::unlink(const char* path)
 	{
-
+		if (this->is_read_only())
+		{
+			return -EACCES;
+		}
 		auto node = get_node(path);
+		return unlink(node);
+	}
+
+	int RamFilesystem::unlink(Node* node)
+	{
 		if (!node)
 		{
 			return -ENOENT;
 		}
 
+		if (this->is_read_only())
+		{
+			return -EACCES;
+		}
 
+
+		if (node_in_use(node))
+		{
+			return -EBUSY;
+		}
 		if (node->has_flag(RAM_LINK_NODE))
 		{
-			// TODO
-			NOT_IMPLEMENTED
-			assert(false);
-			return -1;
+			this->delete_node(node);
+			return 0;
 		}
 		else if (node->has_flag(RAM_FILE_NODE))
 		{
@@ -898,75 +1028,126 @@ namespace RamFS
 		}
 		else if (node->has_flag(RAM_DIR_NODE))
 		{
-			// TODO
-			NOT_IMPLEMENTED
-			assert(false);
-			return -1;
+			return this->delete_dir((DirectoryNode*)node);
 		}
 		else
 		{
-			// TODO
-			NOT_IMPLEMENTED
-			assert(false);
-			return -1;
+			return -EINVAL;
+		}
+		
+
+
+	}
+
+	bool RamFilesystem::node_in_use(Node* n) const
+	{
+		n = resolve_if_link(n);
+		if (!n)
+		{
+			return false;
+		}
+
+		if (n->has_flag(RAM_DIR_NODE))
+		{
+			return dir_in_use((DirectoryNode*)n);
+		}
+		else // if (n->has_flag(RAM_FILE_NODE))
+		{
+			return file_in_use((FileNode*)n);
 		}
 	}
 		
 	
 	int RamFilesystem::rmdir(const char* path)
 	{
-		// TODO
-		NOT_IMPLEMENTED
-		assert(false);
-		return -1;
+		if (this->is_read_only())
+		{
+			return -EACCES;
+		}
+
+		auto node = get_node(path);
+		if (!node)
+		{
+			return -ENOENT;
+		}
+
+		if (!node->has_flag(RAM_DIR_NODE))
+		{
+			return -ENOTDIR;
+		}
+
+		if (node->has_flag(RAM_LINK_NODE))
+		{
+			return -ENOTDIR;
+		}
+
+		if (node == m_root)
+		{
+			return -EBUSY;
+		}
+
+		DirectoryNode* dir = (DirectoryNode*)node;
+		return this->delete_dir(dir);
 	}
 		
 	
 	int RamFilesystem::symlink(const char* path, const char* link)
 	{
-		// TODO
-		NOT_IMPLEMENTED
-		assert(false);
-		return -1;
+		if (this->is_read_only())
+		{
+			return -EACCES;
+		}
+		
+		return -ENOTSUP;
 	}
 		
 	
 	int RamFilesystem::rename(const char* path, const char* new_path)
 	{
-		// TODO
-		NOT_IMPLEMENTED
-		assert(false);
-		return -1;
+		if (this->is_read_only())
+		{
+			return -EACCES;
+		}
+
+		return -ENOTSUP;
 	}
 		
 	
 	int RamFilesystem::link(const char* path, const char* new_path)
 	{
-		// TODO
-		NOT_IMPLEMENTED
-		assert(false);
-		return -1;
+		if (this->is_read_only())
+		{
+			return -EACCES;
+		}
+
+		return -ENOTSUP;
 	}
 		
 	
 	int RamFilesystem::chmod(const char* path, mode_t mode)
 	{
-		NOT_IMPLEMENTED
-		return -1;
+		return -ENOTSUP;
 	}
 		
 	
 	int RamFilesystem::chown(const char* path, uid_t uid, gid_t gid)
 	{
-		// TODO
-		NOT_IMPLEMENTED
-		assert(false);
-		return -1;
+		if (this->is_read_only())
+		{
+			return -EACCES;
+		}
+
+		return -ENOTSUP;
 	}
 		
 	
 	int RamFilesystem::truncate(const char* path, off_t new_size)
 	{
+		if (this->is_read_only())
+		{
+			return -EACCES;
+		}
+
 		auto node = get_node(path);
 		node = resolve_if_link(node);
 		if (!node)
@@ -1000,15 +1181,8 @@ namespace RamFS
 	}
 		
 	
-	/*int RamFilesystem::utime(const char* path, utimbuf* buf)
-	{
-		return -1;
-	}*/
-		
-	
 	int RamFilesystem::open(const char* path, fuse_file_info* info)
 	{
-		std::cout << __func__ << std::endl;
 		int rc = 0;
 		auto node = get_node(path);
 		node = resolve_if_link(node);
@@ -1031,7 +1205,7 @@ namespace RamFS
 				rc = this->set_session(session, info);
 				return rc;
 			}
-			else //if (node->has_flag(RAM_DIR_NODE))
+			else
 			{
 				return -EISDIR;
 			}
@@ -1040,7 +1214,6 @@ namespace RamFS
 		{
 			return -ENOENT;
 		}
-		return -1;
 	}
 		
 	
@@ -1059,6 +1232,11 @@ namespace RamFS
 	
 	int RamFilesystem::write(const char* path, const char* buf, size_t size, off_t offset, fuse_file_info* fi)
 	{
+		if (this->is_read_only())
+		{
+			return -EACCES;
+		}
+
 		auto s = session(fi);
 		if (!s)
 		{
@@ -1072,10 +1250,8 @@ namespace RamFS
 	
 	int RamFilesystem::statfs(const char* path, struct statvfs*)
 	{
-		NOT_IMPLEMENTED
-		// TODO
-		assert(false);
-		return -1;
+		// Not used
+		return -ENOTSUP;
 	}
 		
 	
@@ -1107,23 +1283,14 @@ namespace RamFS
 	
 	int RamFilesystem::fsync(const char* path, int data_sync, fuse_file_info*)
 	{
-		std::cout << std::string(20, '\n') << std::endl;
-
-		while (true) ;
-
-		NOT_IMPLEMENTED
-		// TODO
-		assert(false);
-		return -1;
+		// Not used
+		return -ENOTSUP;
 	}
 	
 	
 	
 	int RamFilesystem::opendir(const char* path, fuse_file_info* fi)
 	{
-		std::cout << __func__ << std::endl;
-		std::cout << "\t" << path << std::endl;
-
 		auto node = get_node(path);
 		if (!node)
 		{
@@ -1148,14 +1315,8 @@ namespace RamFS
 		}
 
 
-		// TODO: Permission check
-		// DirectoryNode* dir = (DirectoryNode*)node;
-
-
 
 		fi->fh = (uintptr_t)node;
-
-		std::cout << "opendir() returning 0" << std::endl;
 
 		return 0;
 	}
@@ -1193,14 +1354,12 @@ namespace RamFS
 		for (const auto& pair : dir->get_children())
 		{
 			rc = filler(buf, pair.first.c_str(), nullptr, 0);
-			std::cout << "Filling buf with " << pair.first.c_str() << std::endl;
 			if (rc == 1)
 			{
 				return -ENOMEM;
 			}
 		}
 
-		std::cout << "readdir() returning 0" << std::endl;
 
 		return 0;
 	}
@@ -1215,10 +1374,8 @@ namespace RamFS
 	
 	int RamFilesystem::fsyncdir(const char* path, int data_sync, fuse_file_info*)
 	{
-		NOT_IMPLEMENTED
-		// TODO
-		assert(false);
-		return -1;
+		// Not used
+		return -ENOTSUP;
 	}
 		
 	
@@ -1231,9 +1388,6 @@ namespace RamFS
 			return -ENOENT;
 		}
 
-		std::cout << "access() mask = " << mask << std::endl;
-		std::cout << std::flush;
-
 		
 
 		if (mask == F_OK)
@@ -1243,33 +1397,31 @@ namespace RamFS
 
 
 
-		if (mask & R_OK)
-		{
-			// TODO
-		}
+		// Not relevant here
 
-		if (mask & W_OK)
-		{
-			// TODO
-		}
+		// if (mask & R_OK)
+		// {
+		// 	// TODO
+		// }
 
-		if (mask & X_OK)
-		{
-			// TODO
-		}
+		// if (mask & W_OK)
+		// {
+		// 	// TODO
+		// }
 
-		NOT_IMPLEMENTED
-		// TODO
-		assert(false);
+		// if (mask & X_OK)
+		// {
+		// 	// TODO
+		// }
+
+		return 0;
 	}
 		
 	
 	int RamFilesystem::ftruncate(const char* path, off_t offset, fuse_file_info*)
 	{
-		NOT_IMPLEMENTED
-		// TODO
-		assert(false);
-		return -1;
+		// Not used
+		return -ENOTSUP;
 	}
 
 	int RamFilesystem::utimens(const char* path, const struct timespec tv[2])
@@ -1309,10 +1461,8 @@ namespace RamFS
 	
 	int RamFilesystem::fgetattr(const char* path, struct stat* statbuf, fuse_file_info*)
 	{
-		NOT_IMPLEMENTED
-		// TODO
-		assert(false);
-		return -1;
+		// Not used
+		return -ENOTSUP;
 	}
 	
 }
